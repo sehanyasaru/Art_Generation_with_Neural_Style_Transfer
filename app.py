@@ -129,7 +129,7 @@ if content_image and style_image:
     if st.button('Start Style Transfer'):
         for i in range(epochs):
             train_step(generated_image, vgg_model_outputs, a_C, a_S)
-            if i % 50 == 0 or i == epochs - 1:
+            if i % 50 == 0:
                 st.write(f"Epoch {i + 1}")
                 image = tensor_to_image(generated_image)
                 st.image(image)
