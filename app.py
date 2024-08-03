@@ -1,12 +1,13 @@
+from flask import Flask, request, jsonify, render_template
+from flask_socketio import SocketIO, emit
 import base64
-
 import numpy as np
 import tensorflow as tf
 from PIL import Image
 from io import BytesIO
-from flask import Flask, request, send_file, jsonify, render_template_string
 
 app = Flask(__name__)
+socketio = SocketIO(app)
 
 img_size = 400
 tf.random.set_seed(272)
@@ -26,7 +27,6 @@ STYLE_LAYERS = [
 
 content_layer = [('block5_conv4', 1)]
 
-# Content cost function
 def compute_content_cost(content_output, generated_output):
     a_C = content_output[-1]
     a_G = generated_output[-1]
@@ -36,12 +36,10 @@ def compute_content_cost(content_output, generated_output):
     J_content = (1 / (4 * n_H * n_W * n_C)) * tf.reduce_sum(tf.square(tf.subtract(a_C_unrolled, a_G_unrolled)))
     return J_content
 
-# Gram matrix function
 def gram_matrix(A):
     GA = tf.matmul(A, A, transpose_b=True)
     return GA
 
-# Style cost function
 def compute_layer_style_cost(a_S, a_G):
     m, n_H, n_W, n_C = a_G.get_shape().as_list()
     a_S = tf.transpose(tf.reshape(a_S, shape=[-1, n_C]))
@@ -64,7 +62,6 @@ def total_cost(J_content, J_style, alpha=10, beta=40):
     J = alpha * J_content + beta * J_style
     return J
 
-# Function to get outputs of selected layers
 def get_layer_outputs(vgg, layer_names):
     outputs = [vgg.get_layer(layer[0]).output for layer in layer_names]
     model = tf.keras.Model([vgg.input], outputs)
@@ -99,57 +96,7 @@ vgg_model_outputs = get_layer_outputs(vgg, STYLE_LAYERS + content_layer)
 
 @app.route('/')
 def index():
-    return '''
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Upload Images</title>
-    </head>
-    <body>
-        <h1>Upload Content and Style Images</h1>
-        <form action="/upload" method="post" enctype="multipart/form-data">
-            <label for="content_image">Content Image:</label>
-            <input type="file" name="content_image" id="content_image" required><br><br>
-            <label for="style_image">Style Image:</label>
-            <input type="file" name="style_image" id="style_image" required><br><br>
-            <label for="epochs">Number of Epochs:</label>
-            <input type="number" name="epochs" id="epochs" value="50" min="1" required><br><br>
-            <button type="submit">Upload</button>
-        </form>
-        <div id="status"></div>
-        <script>
-            const form = document.querySelector('form');
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const formData = new FormData(form);
-                const statusDiv = document.getElementById('status');
-                statusDiv.innerText = 'Processing...';
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await response.json();
-                if (data.result) {
-                    const img = document.createElement('img');
-                    img.src = 'data:image/png;base64,' + data.result;
-                    statusDiv.innerText = '';
-                    statusDiv.appendChild(img);
-
-                    // Create download link
-                    const downloadLink = document.createElement('a');
-                    downloadLink.href = 'data:image/png;base64,' + data.result;
-                    downloadLink.download = 'stylized_image.png';
-                    downloadLink.innerText = 'Download Image';
-                    statusDiv.appendChild(downloadLink);
-                } else {
-                    statusDiv.innerText = 'An error occurred.';
-                }
-            });
-        </script>
-    </body>
-    </html>
-    '''
+    return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
 def upload():
@@ -182,8 +129,9 @@ def upload():
     generated_image = tf.Variable(generated_image)
 
     for i in range(epochs):
-        train_step(generated_image, vgg_model_outputs, a_C, a_S)
-        print(f'Epoch {i + 1}/{epochs}')
+        J = train_step(generated_image, vgg_model_outputs, a_C, a_S)
+        socketio.emit('progress', {'epoch': i + 1, 'total_epochs': epochs, 'loss': float(J)})
+        print(f'Epoch {i + 1}/{epochs}, Loss: {float(J)}')
 
     result_image = tensor_to_image(generated_image)
 
@@ -191,10 +139,10 @@ def upload():
     result_image.save(img_io, 'PNG')
     img_io.seek(0)
 
-    # Encode the image to base64 for inclusion in JSON response
     img_base64 = base64.b64encode(img_io.getvalue()).decode('utf-8')
 
     return jsonify({'result': img_base64})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+

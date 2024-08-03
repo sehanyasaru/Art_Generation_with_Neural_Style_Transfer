@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upload Images</title>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <style>
+        #progress-container {
+            width: 100%;
+            background-color: #f3f3f3;
+        }
+        #progress-bar {
+            width: 0%;
+            height: 30px;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+<h1>Upload Content and Style Images</h1>
+<form action="/upload" method="post" enctype="multipart/form-data">
+    <label for="content_image">Content Image:</label>
+    <input type="file" name="content_image" id="content_image" required><br><br>
+    <label for="style_image">Style Image:</label>
+    <input type="file" name="style_image" id="style_image" required><br><br>
+    <label for="epochs">Number of Epochs:</label>
+    <input type="number" name="epochs" id="epochs" value="50" min="1" required><br><br>
+    <button type="submit">Upload</button>
+</form>
+<div id="status"></div>
+<div id="progress-container">
+    <div id="progress-bar">0%</div>
+</div>
+<script>
+    const form = document.querySelector('form');
+    const socket = io();
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const statusDiv = document.getElementById('status');
+        const progressBar = document.getElementById('progress-bar');
+        statusDiv.innerText = 'Processing...';
+        progressBar.style.width = '0%';
+        progressBar.innerText = '0%';
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (data.result) {
+            const img = document.createElement('img');
+            img.src = 'data:image/png;base64,' + data.result;
+            statusDiv.innerText = '';
+            statusDiv.appendChild(img);
+
+            const downloadLink = document.createElement('a');
+            downloadLink.href = 'data:image/png;base64,' + data.result;
+            downloadLink.download = 'stylized_image.png';
+            downloadLink.innerText = 'Download Image';
+            statusDiv.appendChild(downloadLink);
+        } else {
+            statusDiv.innerText = 'An error occurred.';
+        }
+    });
+
+    socket.on('progress', (data) => {
+        const progressBar = document.getElementById('progress-bar');
+        const percentage = (data.epoch / data.total_epochs) * 100;
+        progressBar.style.width = percentage + '%';
+        progressBar.innerText = Math.round(percentage) + '%';
+    });
+</script>
+</body>
+</html>
